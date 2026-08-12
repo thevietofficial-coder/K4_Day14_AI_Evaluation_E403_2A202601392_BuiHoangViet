@@ -30,11 +30,11 @@ critical.
 
 | Metric | Acceptable Low Score Scenario | Critical Low Score Scenario | Action Required |
 |---|---|---|---|
-| Faithfulness | | | |
-| Answer Relevance | | | |
-| Context Recall | | | |
-| Context Precision | | | |
-| Completeness | | | |
+| Faithfulness | Score thấp có thể tạm chấp nhận khi câu trả lời chỉ bổ sung lời chào, cách diễn đạt tự nhiên hoặc hướng dẫn chung an toàn không làm thay đổi nội dung chính sách. | Score thấp là critical khi câu trả lời bịa thông số sản phẩm, trạng thái đơn hàng, mức giảm giá, thời hạn, quyền lợi bảo hành hoặc đưa ra claim không có trong corpus; đặc biệt nghiêm trọng với privacy và safety. | Kiểm tra gold/retrieved contexts, cải thiện retrieval và system prompt; yêu cầu mọi policy claim phải được grounded, thêm hallucination guardrail và block deployment nếu lỗi safety/privacy tái diễn. |
+| Answer Relevance | Score thấp có thể chấp nhận khi câu hỏi mơ hồ và assistant chủ động hỏi lại thông tin cần thiết trước khi trả lời, chẳng hạn order date hoặc order status. | Score thấp là critical khi câu hỏi rõ ràng nhưng assistant trả lời sai intent, chuyển sang một policy không liên quan hoặc đưa hướng dẫn không giải quyết nhu cầu của khách hàng. | Cải thiện intent detection và prompt, thêm examples cho các intent dễ nhầm, kiểm tra routing/retrieval query và bổ sung test cases cho câu hỏi mơ hồ. |
+| Context Recall | Score thấp có thể chấp nhận khi expected answer chứa nhiều cách diễn đạt tương đương nhưng retrieved chunks vẫn có đủ evidence cốt lõi để tạo câu trả lời đúng và an toàn. | Score thấp là critical khi retriever bỏ sót điều kiện, ngoại lệ, effective date hoặc policy version làm câu trả lời có thể sai; ví dụ thiếu quy định v1/v2 của return policy. | Kiểm tra chunking và truy vấn BM25, điều chỉnh top_k, bổ sung metadata/filter hoặc query expansion; thêm case bị bỏ sót vào regression suite và đo lại Context Recall. |
+| Context Precision | Score thấp có thể chấp nhận khi evidence đúng vẫn nằm trong top-k và context window đủ lớn, nên generator vẫn nhận được đầy đủ thông tin dù có một số chunk nhiễu. | Score thấp là critical khi nhiều chunk không liên quan đứng trước evidence, làm evidence quan trọng bị đẩy khỏi context window hoặc khiến model trộn lẫn các policy. | Áp dụng reranking, cải thiện retrieval query/chunking, lọc chunk theo document/intent và so sánh Context Precision trước–sau mà vẫn theo dõi Context Recall. |
+| Completeness | Score thấp có thể chấp nhận khi assistant cố ý trả lời ngắn, nhưng vẫn cung cấp kết luận và hành động chính; phần thiếu chỉ là chi tiết phụ không ảnh hưởng quyết định của khách hàng. | Score thấp là critical khi câu trả lời bỏ sót amount, deadline, eligibility, exception, required evidence hoặc bước an toàn, khiến khách hàng có thể thực hiện sai quy trình. | Viết prompt yêu cầu kiểm tra đủ điều kiện và ngoại lệ, cải thiện retrieval nếu evidence bị thiếu, thêm answer checklist/few-shot examples và tạo regression tests cho các chi tiết thường bị bỏ sót. |
 
 ### Exercise 1.2 — Bias trong LLM-as-a-Judge
 
@@ -47,14 +47,57 @@ Ba bias thường gặp:
 **Câu 1: Thiết kế experiment phát hiện position bias với ít nhất hai conditions.**
 
 > *Câu trả lời:*
+> Lấy cùng một cặp answer (A, B) cho mỗi câu hỏi trong golden dataset, rồi cho
+> judge chấm **hai lần** với thứ tự trình bày đảo ngược:
+> - **Condition 1 (A-first):** prompt đưa answer A trước, answer B sau, hỏi judge chọn cái tốt hơn.
+> - **Condition 2 (B-first):** cùng cặp A/B nhưng đảo vị trí — B trước, A sau.
+>
+> Giữ nguyên nội dung answer, chỉ đổi thứ tự xuất hiện. Sau đó tính:
+> - **Flip rate**: tỷ lệ % câu hỏi mà lựa chọn "answer tốt hơn" của judge đổi
+>   theo vị trí thay vì theo nội dung (judge chọn A ở condition 1 nhưng lại
+>   chọn B ở condition 2 dù nội dung B ở condition 2 chính là A ở condition 1).
+> - **First-position win rate**: tỷ lệ judge chọn answer ở vị trí đầu tiên,
+>   gộp cả hai condition. Nếu tỷ lệ này lệch đáng kể khỏi 50% (ví dụ >65%),
+>   đó là bằng chứng thống kê của position bias.
+> - Để chắc chắn hơn, chạy thêm với cặp answer chất lượng ngang nhau (đã biết
+>   trước là "tie") — nếu judge vẫn thiên vị theo vị trí thay vì trả về tie,
+>   bias càng rõ.
 
 **Câu 2: Làm thế nào giảm verbosity bias bằng rubric design?**
 
 > *Câu trả lời:*
+> - Thêm tiêu chí **conciseness** rõ ràng vào rubric (ví dụ: "trừ điểm nếu câu
+>   trả lời chứa thông tin thừa, lặp lại hoặc padding không cần thiết"), thay
+>   vì chỉ có các tiêu chí "đầy đủ/chi tiết" vốn vô tình thưởng cho câu dài.
+> - Tách rõ **completeness** (đủ ý cần thiết theo `expected answer`/gold
+>   context) khỏi **length** — yêu cầu judge chấm completeness dựa trên số ý
+>   bắt buộc có mặt, không dựa trên số câu/số từ.
+> - Đưa **few-shot calibration examples** vào prompt của judge: một cặp câu
+>   trả lời ngắn-đúng-đủ ý vs. câu trả lời dài-dư thừa-không thêm giá trị, kèm
+>   điểm mẫu, để judge học chuẩn "ngắn mà đủ vẫn là điểm cao nhất".
+> - Chỉ thị tường minh trong prompt: "Không được cho điểm cao hơn chỉ vì câu
+>   trả lời dài hơn; đánh giá dựa trên độ chính xác và mức độ đủ ý so với
+>   yêu cầu, không dựa trên độ dài."
+> - Nếu dùng pairwise comparison, có thể chuẩn hoá độ dài giữa hai answer
+>   trước khi đưa cho judge (cắt bớt/prompt answer ngắn hơn viết dài tương
+>   đương) để tách biệt effect của length khỏi effect của quality.
 
 **Câu 3: Tại sao cần calibrate LLM judge với human labels?**
 
 > *Câu trả lời:*
+> LLM judge có thể mắc đúng các bias nêu trên (position, verbosity,
+> self-preference) và không có gì đảm bảo "cảm nhận đúng/sai" của nó khớp với
+> tiêu chuẩn nghiệp vụ thực tế — ví dụ chính sách đổi trả, bảo hành của
+> OrbitTech có các ràng buộc rất cụ thể mà một judge tổng quát có thể đánh giá
+> sai dù văn phong answer nghe "hợp lý". Calibrate bằng cách lấy một tập nhỏ
+> câu hỏi đã có nhãn con người (human label: đúng/sai, hoặc thang điểm), cho
+> LLM judge chấm cùng tập đó, rồi đo mức độ đồng thuận (agreement rate, Cohen's
+> kappa, hoặc correlation giữa điểm judge và điểm người). Nếu đồng thuận thấp,
+> cần điều chỉnh rubric/prompt của judge rồi đo lại, lặp lại đến khi đạt
+> ngưỡng tin cậy chấp nhận được. Không calibrate thì không có cách nào biết
+> điểm số tự động của judge có phản ánh đúng chất lượng thật hay chỉ phản ánh
+> bias/thiên hướng riêng của model đó — dẫn đến quyết định sai (ví dụ chặn
+> deploy oan, hoặc bỏ lọt regression thật).
 
 ### Exercise 1.3 — Evaluation trong CI/CD
 
@@ -62,13 +105,33 @@ Ba bias thường gặp:
 
 | Metric | Threshold | Lý do |
 |---|---:|---|
-| Faithfulness | | |
-| Answer Relevance | | |
-| Completeness | | |
+| Faithfulness | ≥ 0.85 | Faithfulness thấp nghĩa là câu trả lời không grounded vào context — rủi ro bịa chính sách, giá, bảo hành. Hậu quả trực tiếp tới khách hàng và pháp lý nên đặt cao hơn ngưỡng "good" chung (0.8) thay vì chỉ chặn ở mức "significant issues" (0.6). |
+| Answer Relevance | ≥ 0.75 | Nằm ở biên trên của dải "needs work" (0.6–0.8): câu trả lời lạc đề vẫn gây trải nghiệm xấu nhưng ít nguy hiểm hơn hallucination, nên có thể cho qua nếu vượt 0.75 và theo dõi thêm thay vì chặn cứng ở 0.8. |
+| Completeness | ≥ 0.75 | Thiếu chi tiết phụ (câu hỏi hẹp) đôi khi chấp nhận được, nhưng dưới 0.75 có nguy cơ bỏ sót amount/deadline/exception quan trọng khiến khách hàng làm sai quy trình — đủ nghiêm trọng để chặn deploy. |
 
 **Câu 2: Khi nào dùng offline evaluation, online evaluation và human review?**
 
 > *Câu trả lời:*
+> - **Offline evaluation** (golden dataset, chạy trong CI/CD trước khi merge/deploy):
+>   dùng làm **gate tự động** — nhanh, lặp lại được, cùng một bộ câu hỏi/threshold
+>   mỗi lần nên phát hiện regression sớm trước khi code lên production. Phù hợp
+>   để chặn deploy khi Faithfulness/Answer Relevance/Completeness rớt dưới
+>   threshold ở Câu 1.
+>   Giới hạn: golden dataset chỉ 20 câu, không phủ hết cách hỏi thật của khách
+>   hàng ngoài production.
+> - **Online evaluation** (giám sát traffic thật sau khi đã deploy): dùng để
+>   **theo dõi liên tục** — lấy mẫu câu hỏi/câu trả lời thật, chấm bằng LLM
+>   judge hoặc RAGAS batch định kỳ, theo dõi drift theo thời gian (retrieval
+>   xuống cấp khi corpus đổi, model provider update...). Không chặn từng
+>   deploy nhưng dùng để cảnh báo (alert) khi metric tụt dưới threshold trên
+>   traffic thật — bắt được case golden dataset không có.
+> - **Human review**: dùng khi (1) calibrate LLM judge với nhãn người (theo
+>   Exercise 1.2 Câu 3) trước khi tin tưởng threshold tự động; (2) score nằm
+>   sát biên threshold (borderline, ví dụ 0.72–0.78) mà automated judge không
+>   đủ tin cậy để quyết định pass/fail một mình; (3) câu hỏi thuộc nhóm rủi ro
+>   cao — an toàn, quyền riêng tư, khiếu nại pháp lý — luôn cần người xác nhận
+>   dù score tự động cao; (4) audit định kỳ lấy mẫu ngẫu nhiên từ production để
+>   phát hiện lỗi hệ thống mà cả offline lẫn online evaluation đều bỏ sót.
 
 ---
 
