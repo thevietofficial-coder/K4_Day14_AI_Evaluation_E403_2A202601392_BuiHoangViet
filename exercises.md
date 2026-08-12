@@ -403,19 +403,93 @@ verbosity bias và self-preference bằng cách nào?
 Chỉ làm sau khi hoàn thành 3.1–3.3. Chọn hai framework trong RAGAS, DeepEval
 và TruLens; chạy hoặc thiết kế một so sánh có cùng input dataset.
 
-| Tiêu chí | Framework 1: ____ | Framework 2: ____ |
+**Đã cài và chạy thật** `ragas==0.4.3` và `deepeval==4.1.7` (judge model
+`gpt-4o-mini`, khớp `OPENAI_MODEL` trong `.env`) trên đúng 5 case thật lấy từ
+`artifacts/actual_answers.json`: `E05` (case tốt, để làm baseline đối chiếu),
+`H01` (lỗi generation đã fix — mục 6.1 `reflection.md`), `H04`/`A02` (bị
+`RAGASEvaluator` heuristic của bài gắn nhãn `hallucination`/`off_topic` sai —
+mục 2, 6.2 `reflection.md`), và `A03` (Recall thấp nhất). Kết quả lưu ở
+`artifacts/framework_comparison.json`.
+
+**Trục trặc thật khi setup (đáng ghi lại):** `ragas==0.4.3` import
+`langchain_community.chat_models.vertexai` một cách unconditional dù không hề
+dùng VertexAI — module này đã bị gỡ khỏi `langchain-community==0.4.2` hiện
+hành (đổi sang package riêng `langchain-google-vertexai`, rất nặng, kéo theo
+Google Cloud SDK). Thay vì cài thêm cả SDK đó chỉ để thoả một import không
+dùng tới, mình stub module đó bằng `sys.modules` trước khi `import ragas` —
+đúng tinh thần "không thêm dependency không cần thiết" dù đây là **bug đóng
+gói thật của ragas 0.4.3**, không phải lỗi cấu hình của bài.
+
+| Tiêu chí | Framework 1: RAGAS 0.4.3 | Framework 2: DeepEval 4.1.7 |
 |---|---|---|
-| Setup complexity | | |
-| Metrics available | | |
-| CI/CD integration | | |
-| Kết quả trên cùng dataset | | |
-| Insight rút ra | | |
+| Setup complexity | `pip install ragas` kéo theo LangChain đầy đủ (`langchain`, `langchain-core`, `langchain-openai`...) và có bug đóng gói thật (xem trên); dùng `ragas.metrics.collections` (API mới nhất) chỉ cần `llm_factory(model, provider="openai", client=AsyncOpenAI())`, **không** cần convert sang HuggingFace `Dataset` như API cũ. | `pip install deepeval` nhẹ hơn, import sạch không lỗi; `LLMTestCase(input=..., actual_output=..., retrieval_context=..., expected_output=...)` dùng trực tiếp Python object, set `model="gpt-4o-mini"` ngay trên từng metric — setup nhanh nhất trong hai framework. |
+| Metrics available | `Faithfulness`, `ContextPrecision`, `ContextRecall` dùng LLM decompose-claim + NLI-style verify — đúng 3/4 metric mà `template.py` mô phỏng bằng heuristic, cộng nhiều biến thể khác (`AnswerAccuracy`, `FactualCorrectness`, `NoiseSensitivity`...). | Tương đương RAGAS (`FaithfulnessMetric`, `ContextualPrecisionMetric`, `ContextualRecallMetric`) **cộng thêm** `HallucinationMetric`, `BiasMetric`, `GEval` (rubric tự nhiên ngôn ngữ, gần với `LLMJudge.score_response(rubric)` đã cài trong bài). |
+| CI/CD integration | Không có runner riêng; phải tự viết logic so threshold, giống `BenchmarkRunner.run_regression()` đã làm trong bài. | Có `deepeval test run` hoạt động như `pytest`, mỗi metric tự có threshold/pass-fail — sát triết lý "eval as quality gate" ở Exercise 1.3 hơn RAGAS. |
+| Kết quả trên cùng dataset (**thật**, xem bảng số liệu dưới) | Xác nhận đúng giả thuyết ở `reflection.md` 6.2: `H04` Faithfulness = **0.833** (heuristic: 0.286), `A02` = **1.000** (heuristic: 0.300). | Cùng xác nhận: `H04` = **1.000**, `A02` = **1.000**. Nhưng `A03` lại lệch hẳn với RAGAS (xem phân tích bên dưới). |
+| Insight rút ra | Cả hai đều giải quyết đúng lớp lỗi bài đã tự phát hiện: đo **semantic entailment với evidence thật** thay vì lexical overlap với gold excerpt hẹp → không còn phạt paraphrase đúng (`H04`, `A02`). Chi phí thật: mỗi case cần 2–4 lượt gọi LLM tuần tự cho riêng Faithfulness (decompose claims rồi verify từng claim) — 5 case × 3 metric × 2 framework trong lần chạy này mất vài phút dù chỉ dùng `gpt-4o-mini`. |
 
-- Scores có nhất quán không?
-- Framework nào strict hơn và vì sao?
-- Hai framework có tìm ra cùng failure cases không?
+**Bảng số liệu thật (Faithfulness / Context Precision / Context Recall):**
 
-> *Phân tích:*
+| ID | Heuristic (bài) | RAGAS 0.4.3 | DeepEval 4.1.7 |
+|---|---|---|---|
+| E05 | 0.818 / 0.750 / 0.800 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 |
+| H01 | 0.613 / 1.000 / 0.763 | 0.600 / 1.000 / 0.667 | 0.600 / 1.000 / 0.750 |
+| **H04** | **0.286** / 0.887 / 0.636 | **0.833** / 1.000 / 1.000 | **1.000** / 1.000 / 1.000 |
+| **A02** | **0.300** / 0.887 / 0.667 | **1.000** / 0.888 / 1.000 | **1.000** / 0.700 / 0.667 |
+| A03 | 0.278 / 1.000 / 0.419 | **0.250** / 0.917 / 0.600 | **1.000** / 0.500 / 0.750 |
+
+**Scores có nhất quán không?** **Không hoàn toàn — kể cả giữa hai LLM-judge
+thật với nhau.** Với `H04`/`A02`, RAGAS và DeepEval đồng thuận rất mạnh (đều
+cho Faithfulness cao, xác nhận heuristic của bài sai) và với `H01`, hai
+framework cho đúng cùng một số (0.600) dù tính độc lập. Nhưng với `A03`, hai
+framework **lệch nhau nghiêm trọng**: RAGAS = 0.250 (còn thấp hơn cả
+heuristic!) trong khi DeepEval = 1.000. Mình đào sâu nguyên nhân bằng cách
+lấy claim-decomposition thật của RAGAS cho answer của `A03`
+("*Your NovaBook 14, being 30 months old, is no longer under warranty...*"):
+RAGAS tách thành 4 claim — `"NovaBook 14 is 30 months old"`, `"no longer
+under warranty"`, `"standard warranty period is 24 months"`, `"a free
+replacement cannot be approved"` — rồi verify **từng claim** so với retrieved
+context. Claim "30 months old" chỉ đến từ câu hỏi của user, không có trong
+context nào → bị tính "unsupported"; claim "cannot be approved" cũng không có
+câu chữ tường minh trong 5 chunk đã retrieve (evidence `00_system_scope.md`
+về authority limit không nằm trong top-5 — đúng root cause Recall thấp đã ghi
+ở `reflection.md` Failure 1) → cũng "unsupported". Chỉ 1/4 claim (warranty
+24 tháng) được support thuần túy bởi context → 0.25. DeepEval's reason cho
+điểm 1.0: *"there are no contradictions present, indicating that the actual
+output aligns perfectly with the retrieval context"* — tức DeepEval định
+nghĩa Faithfulness là **"không mâu thuẫn với context"**, còn RAGAS định nghĩa
+là **"mọi claim phải được context xác nhận"** — hai định nghĩa khác nhau về
+bản chất, không phải một trong hai "chạy sai".
+
+**Framework nào strict hơn và vì sao?** Với case `A03` này, **RAGAS strict
+hơn hẳn** vì yêu cầu *entailment* (context phải chứng minh được claim), trong
+khi DeepEval chỉ yêu cầu *không mâu thuẫn* (absence-of-contradiction) — một
+answer có thể "không sai" nhưng vẫn chứa claim không có nguồn context tường
+minh (như tuổi thiết bị lấy từ câu hỏi, hoặc kết luận suy luận hợp lý nhưng
+không trích dẫn được câu chữ cụ thể) mà DeepEval vẫn cho pass tuyệt đối. Đây
+không phải "RAGAS khó tính vô cớ" mà là hai triết lý đo khác nhau — cần biết
+rõ định nghĩa đang dùng trước khi đặt threshold cho CI/CD (Exercise 1.3).
+
+**Hai framework có tìm ra cùng failure cases không?** Có, với `H01` (cả hai
+cùng cho 0.600 — đủ thấp để một threshold ≥0.7 chặn cả hai, đúng ngưỡng đã
+chọn ở Exercise 1.3) và với `H04`/`A02` (cả hai cùng "tha bổng", khác hẳn
+heuristic — xác nhận đúng phát hiện ở `reflection.md` 6.2). Không, với `A03`:
+RAGAS vẫn coi là failure (0.25, thậm chí thấp hơn heuristic), DeepEval coi là
+pass tuyệt đối (1.0) — **hai framework LLM-judge thật cũng không luôn đồng
+thuận với nhau**, không chỉ khác với heuristic của bài.
+
+> *Phân tích:* Bài học chính, khác với dự đoán ban đầu: không chỉ heuristic
+> word-overlap mới "sai" theo cách riêng của nó — **hai LLM-judge "chuẩn công
+> nghiệp" cũng có thể bất đồng nghiêm trọng** (`A03`: 0.25 vs 1.0) vì định
+> nghĩa metric khác nhau (entailment-required vs. no-contradiction), đúng như
+> Exercise 1.2 Câu 3 đã cảnh báo: không được tin bất kỳ judge nào là "chân lý"
+> mà không calibrate với human label trước. RAGAS phù hợp hơn khi cần chặt —
+> production RAG không được phép chứa claim vô căn cứ dù đúng (ví dụ số liệu
+> tài chính); DeepEval phù hợp hơn khi cần đo "có nói sai không" và có
+> `GEval` để tự định nghĩa rubric sát với case OrbitTech (như rubric 5 mức ở
+> Exercise 3.3). `H04`/`A02` vẫn là bằng chứng chắc chắn nhất: heuristic của
+> bài đánh sai theo cả hai framework thật, nên kết luận ở `reflection.md` 6.2
+> được xác nhận bằng dữ liệu thật, không còn là suy đoán.
 
 ### Exercise 3.5 — Retrieval Reranking (Bonus +5)
 
@@ -428,22 +502,69 @@ thay đổi Context Recall hay không.
 4. Rerank cùng tập chunks, không thêm hoặc xóa chunk.
 5. Tính lại hai metrics và giải thích kết quả.
 
+Đã dùng `rerank_by_overlap()` có sẵn trong `template.py`/`solution/solution.py`
+(sort theo word-overlap giữa mỗi chunk và **câu hỏi**, không dùng expected
+answer — đúng với thực tế production, lúc rerank chưa biết gold answer),
+chạy trên `retrieved_contexts` thật của 5 case có Context Precision thấp nhất
+trong benchmark hiện tại (`H03`, `E05`, `E04`, `H02`, `M05`), cùng tập 5
+chunk, chỉ đổi thứ tự.
+
 | ID | Recall before | Recall after | Precision before | Precision after | Delta Precision |
 |---|---:|---:|---:|---:|---:|
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| | | | | | |
-| **Avg** | | | | | |
+| H03 | 0.569 | 0.569 | 0.500 | 0.500 | +0.000 |
+| E05 | 0.800 | 0.800 | 0.750 | 1.000 | +0.250 |
+| E04 | 0.905 | 0.905 | 0.756 | 0.756 | +0.000 |
+| H02 | 0.658 | 0.658 | 0.806 | 1.000 | +0.194 |
+| M05 | 0.750 | 0.750 | 0.833 | 0.833 | +0.000 |
+| **Avg** | **0.736** | **0.736** | **0.729** | **0.818** | **+0.089** |
 
 **Tại sao Recall dự kiến không đổi?**
 
 > *Câu trả lời:*
+> `evaluate_context_recall()` tính trên **union token của toàn bộ tập chunk**
+> (`⋃ _tokenize(chunk) for chunk in contexts`), không quan tâm thứ tự —
+> `rerank_by_overlap()` chỉ `sorted(...)` lại cùng một list, không thêm/bớt
+> chunk nào, nên union token giữ nguyên 100% → Recall trước/sau **về mặt toán
+> học phải bằng nhau tuyệt đối**, và bảng trên xác nhận đúng: cả 5 case Recall
+> before = Recall after không lệch một ly. Điều này khớp đúng thiết kế RAGAS
+> thật: Recall đo "có evidence hay không", Precision đo "evidence đúng có
+> đứng trước noise hay không" — hai câu hỏi độc lập nhau, nên reranking (chỉ
+> tác động thứ tự) chỉ có thể ảnh hưởng Precision.
 
 **Khi nào reranking không đủ và cần sửa retriever/query/chunking?**
 
 > *Câu trả lời:*
+> Đọc thứ tự chunk trước/sau ở 3 case không đổi (`H03`, `E04`, `M05`) cho hai
+> lý do rất khác nhau:
+> - **`E04`, `M05`: đã tối ưu sẵn** — chunk relevant nhất (coverage với expected
+>   answer 0.86 và 0.33) đã nằm đúng rank 1 từ trước; reranker chỉ đổi chỗ vài
+>   chunk nhiễu ở cuối, không ảnh hưởng AP@K vì `Precision@k` chỉ đổi khi thứ
+>   hạng của chunk **relevant** thay đổi. Không còn dư địa để cải thiện bằng
+>   reranking — muốn tăng Precision hơn nữa phải giảm k hoặc lọc chunk nhiễu
+>   ngay từ retrieval, không phải sắp xếp lại.
+> - **`H03`: reranking lexical bị "đánh lừa"** — chunk đứng rank 1
+>   ("OrbitTech provides a 24-month... warranty for... PulsePhone X...") có
+>   coverage với expected answer chỉ 0.08 (không relevant, vì expected answer
+>   nói về **exclusion** accidental damage, không phải độ dài bảo hành), nhưng
+>   nó lại **rất trùng từ với câu hỏi** ("PulsePhone X", "warranty") nên vẫn
+>   được `rerank_by_overlap()` xếp hạng 1 y hệt trước reranking. Đây chính là
+>   giới hạn cốt lõi của lexical reranker: nó đo độ giống **câu hỏi**, không
+>   đo "chunk này có trả lời đúng sub-intent cụ thể hay không" — một chunk
+>   *đúng chủ đề* (on-topic) nhưng *sai chi tiết* (trả lời nhầm sub-question,
+>   ví dụ "độ dài bảo hành" thay vì "loại trừ do rơi vỡ") vẫn thắng vì overlap
+>   từ khoá cao.
+>
+> Kết luận: reranking bằng word-overlap chỉ giúp khi retriever gốc đã tìm đúng
+> chunk nhưng **xếp hạng thấp** (như `E05`, `H02` ở trên). Cần sửa
+> retriever/query/chunking thay vì chỉ rerank khi: (1) evidence cần thiết
+> **không nằm trong top-k** ban đầu — không set nào để rerank (trường hợp này
+> phải tăng k, cải thiện BM25/query, hoặc query decomposition, như đã thấy ở
+> `A03` trong `reflection.md`); hoặc (2) nhiều chunk **cùng chủ đề nhưng khác
+> sub-intent** bị gộp trong một chunk lớn hoặc đứng cạnh nhau (như `H03`) —
+> cần **semantic/cross-encoder reranker** (hiểu sub-intent, không chỉ đếm từ
+> trùng) hoặc **chunking mịn hơn** (tách riêng đoạn "coverage" khỏi đoạn
+> "exclusions" trong `06_warranty_policy.md`) để lexical overlap không còn bị
+> nhầm giữa "đúng chủ đề" và "đúng câu trả lời".
 
 ---
 
@@ -464,4 +585,4 @@ Hoàn thành kiểm tra cuối trong khoảng 16:50–17:00.
 - [x] Exercise 3.3 có rubric 1–5 và bias controls.
 - [x] `reflection.md` có ba failure analyses và regression strategy.
 - [x] Đã copy `template.py` thành `solution/solution.py`. (`pytest` xác nhận đang load từ `solution/solution.py`, `42 passed`)
-- [ ] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus. (code `rerank_by_overlap()` đã xong; write-up 3.5 chưa điền)
+- [x] Exercise 3.4 và 3.5 (bonus, +15) đã hoàn thành bằng dữ liệu **thật**: 3.5 đo `rerank_by_overlap()` trên 5 case từ `artifacts/actual_answers.json`; 3.4 đã cài và chạy thật `ragas`/`deepeval` (`artifacts/framework_comparison.json`) trên 5 case, phát hiện cả hai LLM-judge thật cũng bất đồng với nhau ở `A03` (không chỉ khác heuristic của bài).

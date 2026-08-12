@@ -1,0 +1,66 @@
+{
+  "ragas": [
+    {
+      "id": "E05",
+      "faithfulness": 1.0,
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    },
+    {
+      "id": "H01",
+      "faithfulness": 0.6,
+      "context_precision": 0.9999999999,
+      "context_recall": 0.6666666666666666
+    },
+    {
+      "id": "H04",
+      "faithfulness": 0.8333333333333334,
+      "context_precision": 0.99999999995,
+      "context_recall": 1.0
+    },
+    {
+      "id": "A02",
+      "faithfulness": 1.0,
+      "context_precision": 0.8874999999778125,
+      "context_recall": 1.0
+    },
+    {
+      "id": "A03",
+      "faithfulness": 0.25,
+      "context_precision": 0.9166666666361111,
+      "context_recall": 0.6
+    }
+  ],
+  "deepeval": [
+    {
+      "id": "E05",
+      "faithfulness": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    },
+    {
+      "id": "H01",
+      "faithfulness": 0.6,
+      "context_precision": 1.0,
+      "context_recall": 0.75
+    },
+    {
+      "id": "H04",
+      "faithfulness": 1.0,
+      "context_precision": 1.0,
+      "context_recall": 1.0
+    },
+    {
+      "id": "A02",
+      "faithfulness": 1.0,
+      "context_precision": 0.7000000000000001,
+      "context_recall": 0.6666666666666666
+    },
+    {
+      "id": "A03",
+      "faithfulness": 1.0,
+      "context_precision": 0.5,
+      "context_recall": 0.75
+    }
+  ]
+}
