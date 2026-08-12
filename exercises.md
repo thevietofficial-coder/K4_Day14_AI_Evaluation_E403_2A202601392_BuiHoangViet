@@ -463,5 +463,5 @@ Hoàn thành kiểm tra cuối trong khoảng 16:50–17:00.
 - [x] Exercise 3.2 có năm metrics, aggregate report và ba cases thấp nhất.
 - [x] Exercise 3.3 có rubric 1–5 và bias controls.
 - [x] `reflection.md` có ba failure analyses và regression strategy.
-- [ ] Đã copy `template.py` thành `solution/solution.py`.
+- [x] Đã copy `template.py` thành `solution/solution.py`. (`pytest` xác nhận đang load từ `solution/solution.py`, `42 passed`)
 - [ ] Exercise 3.4 và 3.5 chỉ làm nếu chọn bonus. (code `rerank_by_overlap()` đã xong; write-up 3.5 chưa điền)
